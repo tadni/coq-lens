@@ -15,7 +15,8 @@ install: [
 ]
 depends: [
   "coq" {>= "8.16" & < "8.17~"}
-  "coq-metacoq-template" {= "1.1+8.16"}
+  "coq-metacoq-template" {>= "1.3"}
+  "coq-metacoq-utils" {>= "1.3"}
 ]
 tags: [
   "logpath:Lens"
