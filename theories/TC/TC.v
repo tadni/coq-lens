@@ -1,8 +1,6 @@
 From Coq.Classes Require Import DecidableClass.
 From Coq.Lists Require Import List.
 From Coq.Strings Require Import String.
-(* Avoid [From MetaCoq.Template Require Import utils All.]
-to work around https://github.com/MetaCoq/metacoq/issues/580 *)
 From MetaCoq.Utils Require Import utils monad_utils.
 From MetaCoq.Template Require Import Ast Loader TemplateMonad.
 From Lens Require Import Lens.
@@ -15,6 +13,8 @@ Record Info := {
   type   : ident;
   ctor   : ident;
   fields : list projection_body;
+  npars  : nat;
+  params : list context_decl;
 }.
 
 Fixpoint countTo (n : nat) : list nat :=
@@ -28,31 +28,60 @@ Definition lensName (ls : String.string) (i : ident) : ident :=
 
 MetaCoq Quote Definition cBuild_Lens := Build_Lens.
 
-Local Definition mkLens (At : term) (fields : list projection_body) (i : nat)
+Local Definition mkLens (At : term) (info : Info) (i : nat)
 : option (ident * term) :=
   match At with
   | tInd ind args =>
+    let np      := info.(npars) in
+    let ps      := info.(params) in
+    let fields  := info.(fields) in
+    let nfields := List.length fields in
+    (* inductive applied to its params: tApp (tInd ind []) [tRel (np-1); ...; tRel 0] *)
+    let param_args := map tRel (rev (countTo np)) in
+    let AppliedAt :=
+      if Nat.eqb np 0 then At
+      else tApp At param_args
+    in
     let ctor := tConstruct ind 0 args in
     match nth_error fields i with
     | None => None
     | Some body =>
       let name := body.(proj_name) in
-      let Bt := body.(proj_type) in (* FIXME use relevance? *)
-      let p (x : nat) : projection := mkProjection ind 0 x in
+      (* proj_type is under an extra phantom binder for the inductive itself;
+         subst1 eliminates it to get the type under the param lambdas *)
+      let Bt := subst1 (tRel 0) 0 body.(proj_type) in
+      let p (x : nat) : projection := mkProjection ind np x in
+      (* inside the over body we are under np + 2 binders (params, f, p);
+         params shift up by 2 relative to under-param context *)
+      let param_ctor_args := map (fun k => tRel (k + 2)) (rev (countTo np)) in
       let get_body := tProj (p i) (tRel 0) in
       let f x :=
         let this := tProj (p x) (tRel 0) in
-        if PeanoNat.Nat.eqb x i then tApp (tRel 1) (this :: nil) else this
+        if PeanoNat.Nat.eqb x i
+        then tApp (tRel 1) (this :: nil)
+        else this
       in
-      let update_body := tApp ctor (map f (countTo (List.length fields))) in
-      let def :=
-        tApp cBuild_Lens (At :: At :: Bt :: Bt ::
-          tLambda (mkBindAnn nAnon Relevant) At get_body ::
-          tLambda (mkBindAnn nAnon Relevant) (tProd (mkBindAnn nAnon Relevant) Bt Bt) (tLambda (mkBindAnn nAnon Relevant) At update_body) ::
-          nil
-        )
+      let update_body :=
+        tApp ctor (param_ctor_args ++ map f (countTo nfields))
       in
-      Some (lensName "_" name, def)
+      let lens_body :=
+        tApp cBuild_Lens (
+          AppliedAt :: AppliedAt :: Bt :: Bt ::
+          tLambda (mkBindAnn nAnon Relevant) AppliedAt get_body ::
+          tLambda (mkBindAnn nAnon Relevant)
+            (tProd (mkBindAnn nAnon Relevant) Bt (lift 1 0 Bt))
+            (tLambda (mkBindAnn nAnon Relevant) (lift 1 0 AppliedAt) update_body) ::
+          nil)
+      in
+      (* ind_params is stored innermost-first (B then A for Pair A B),
+         so fold_right produces the correct outermost-first wrapping *)
+      let wrapped :=
+        fold_right
+          (fun decl acc => tLambda decl.(decl_name) decl.(decl_type) acc)
+          lens_body
+          (rev ps)
+      in
+      Some (lensName "_" name, wrapped)
     end
   | _ => None
   end.
@@ -86,13 +115,20 @@ Local Definition getFields (mi : mutual_inductive_body) (n : nat) : TemplateMona
         else ret tt
       | _ => ret tt
       end ;;
-      ret {| type := oib.(ind_name) ; ctor := ctor_name ; fields := oib.(ind_projs) |}
+      ret {|
+        type   := oib.(ind_name) ;
+        ctor   := ctor_name ;
+        fields := oib.(ind_projs) ;
+        npars  := mi.(ind_npars) ;
+        params := mi.(ind_params) ;
+      |}
     | _ => tmFail "`getFields` got variant type"
     end
   end.
+
 Local Definition genLensCore (info : Info) (ty : term) : TemplateMonad unit :=
   let gen i :=
-    match mkLens ty info.(fields) i with
+    match mkLens ty info i with
     | None   => tmFail "failed to build lens"
     | Some l => '(n, d) <- tmEval cbv l ;; tmMkDefinition n d
     end
@@ -107,21 +143,11 @@ Definition genLens (T : Type) : TemplateMonad unit :=
   info <- getFields ind i.(inductive_ind) ;;
   genLensCore info ty.
 
-(*
-[genLensK] can be used instead of [genLens] to avoid introducing
-some universe constraints.
-
-for an inductive X in file A.B.C,
-basename:kername := (MPfile ["C"; "B"; "A"], "X")%string.
-
-If the definition of X refers to any other inductive, they should not
-be in the current section(s).
- *)
 Definition genLensK (baseName : kername) : TemplateMonad unit :=
   let inductive :=
-    {| inductive_mind := baseName; inductive_ind := 0 (* TODO: fix for mutual records *) |}
+    {| inductive_mind := baseName; inductive_ind := 0 |}
   in
   let ty := Ast.tInd inductive List.nil in
   ind <- tmQuoteInductive baseName ;;
-  info <- getFields ind 0;;
+  info <- getFields ind 0 ;;
   genLensCore info ty.
