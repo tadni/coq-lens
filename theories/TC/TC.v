@@ -151,3 +151,15 @@ Definition genLensK (baseName : kername) : TemplateMonad unit :=
   ind <- tmQuoteInductive baseName ;;
   info <- getFields ind 0 ;;
   genLensCore info ty.
+
+Definition genLensN (name : qualid) : TemplateMonad unit :=
+  refs <- tmLocate name ;;
+  match refs with
+  | IndRef ind :: _ =>
+    let ty := Ast.tInd ind List.nil in
+    mi <- tmQuoteInductive ind.(inductive_mind) ;;
+    info <- getFields mi ind.(inductive_ind) ;;
+    genLensCore info ty
+  | [] => tmFail ("not found")
+  | _ => tmFail ("not an inductive")
+  end.

@@ -11,7 +11,7 @@ Record Pair (A B : Type) := {
   fst' : A ;
   snd' : B ;
 }.
-MetaCoq Run (genLensK (MPfile ["test"], "Pair")).
+MetaCoq Run (genLensN "Pair").
 Arguments fst' {_ _}.
 Arguments snd' {_ _}.
 Arguments _fst' {_ _}.
