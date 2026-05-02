@@ -1,80 +1,99 @@
 Set Primitive Projections.
 
-Record Lens (a b c d : Type) : Type :=
-{ view : a -> c
-; over : (c -> d) -> a -> b
+Record Polymorphic (a b c d : Type) : Type := {
+  view : a -> c;
+  set : d -> a -> b
 }.
 
-Record LenticularRelation (a b c d : Type) : Type :=
-  {
-    r_view : a -> c -> Prop;
-    r_over : (c -> d -> Prop) -> a -> b -> Prop
+Definition Simple (a c : Type) : Type := Polymorphic a a c c.
+
+Record Relational (a b c d : Type) : Type := {
+  r_view : a -> c -> Prop;
+  r_over : d -> a -> b -> Prop
+}.
+
+Arguments view {_ _ _ _} _ _.
+Arguments set {_ _ _ _} _ _ _.
+
+Definition compose {a b c d e f : Type}
+           (l0 : Polymorphic a b c d) (l1 : Polymorphic c d e f)
+: Polymorphic a b e f :=
+{| view := fun x : a => view l1 (view l0 x)
+ ; set := fun (u : f) (x : a) => set l0 (set l1 u (view l0 x)) x |}.
+
+Definition product {a c c' : Type}
+           (l0 : Simple a c) (l1 : Simple a c')
+           : Simple a (c * c') :=
+{| view := fun x : a => (view l0 x, view l1 x)
+ ; set := fun (p : c * c') (x : a) =>
+   let '(u, v) := p in
+   set l0 u (set l1 v x) |}.
+
+Definition over {a b c d : Type} (l : Polymorphic a b c d) (f : c -> d) : a -> b :=
+  fun x => set l (f (view l x)) x.
+
+(* Viewing what you just set gives back the new value *)
+Definition view_set' {a c : Type} (l : Simple a c) : Prop :=
+  forall (new : c) (x : a),
+    view l (set l new x) = new.
+
+(* Setting what you just viewed changes nothing *)
+Definition set_view' {a c : Type} (l : Simple a c) : Prop :=
+  forall (x : a),
+    set l (view l x) x = x.
+
+(* The view completely determines the source, present in bijective lenses *)
+Definition strong_set_view' {a c : Type} (l : Simple a c) : Prop :=
+  forall (x x' : a),
+    set l (view l x) x' = x.
+
+(* Two sets at the same focus, last wins *)
+Definition set_set' {a c : Type} (l : Simple a c) : Prop :=
+  forall (u v : c) (x : a),
+    set l v (set l u x) = set l v x.
+
+(* over is determined by view and set *)
+Definition over_spec' {a c : Type} (l : Simple a c) : Prop :=
+  forall (f : c -> c) (x : a),
+    over l f x = set l (f (view l x)) x.
+
+Record Lawful {a c : Type} (l : Simple a c) : Prop :=
+  { view_set : @view_set' a c l
+  ; set_view : @set_view' a c l
+  ; set_set  : @set_set' a c l
   }.
 
-Arguments over {_ _ _ _} _ _ _.
-Arguments view {_ _ _ _} _ _.
+Arguments view_set {a c l}.
+Arguments set_view {a c l}.
+Arguments set_set {a c l}.
 
-Definition lens_compose {a b c d e f : Type}
-           (l1 : Lens a b c d) (l2 : Lens c d e f)
-: Lens a b e f :=
-{| view := fun x : a => view l2 (view l1 x)
- ; over := fun f0 : e -> f => over l1 (over l2 f0) |}.
+Definition commutative {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Prop :=
+  forall (x : a) (v : c) (u : c'),
+    set l0 v (set l1 u x) = set l1 u (set l0 v x).
 
-Section ops.
-  Context {a b c d : Type} (l : Lens a b c d).
+Definition independent_view_over {a c : Type} (l0 l1 : Simple a c) : Prop :=
+  forall (x : a) (u : c),
+    view l0 (set l1 u x) = view l0 x.
 
-  Definition set (new : d) : a -> b :=
-    l.(over) (fun _ => new).
-End ops.
+Theorem lawful_product {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
+  Lawful (product l0 l1).
+Proof.
+  apply Build_Lawful.
+  - unfold view_set'. intros [u v] x. simpl. f_equal.
+    + apply (view_set lawful0).
+    + rewrite compatible. apply (view_set lawful1).
+  - unfold set_view'. intros x. simpl. rewrite (set_view lawful1).
+    apply (set_view lawful0). 
+  - unfold set_set'. intros [u u'] [v v'] x. simpl.
+    rewrite <- compatible. rewrite (set_set lawful1). rewrite (set_set lawful0).
+    reflexivity.
+Qed.
 
-Module LensNotations.
-  Declare Scope lens_scope.
-  Delimit Scope lens_scope with lens.
-  Bind Scope lens_scope with Lens.
-
-  Notation "X -l> Y" := (Lens X X Y Y)
-    (at level 99, Y at level 200, right associativity) : type_scope.
-  Notation "a & b" := (b a) (at level 50, only parsing, left associativity) : lens_scope.
-  Notation "a %= f" := (Lens.over a f) (at level 49, left associativity) : lens_scope.
-  Notation "a .= b" := (Lens.set a b) (at level 49, left associativity) : lens_scope.
-  Notation "a .^ f" := (Lens.view f a) (at level 45, left associativity) : lens_scope.
-  (* level 19 to be compatible with Iris .@ *)
-  Notation "a .@ b" := (lens_compose a b) (at level 19, left associativity) : lens_scope.
-End LensNotations.
-
-Section LensLaws.
-  Context {a b c d : Type} (l : Lens a b c d).
-
-  (* Viewing what you just set gives back the new value *)
-  Definition law_view_set : Prop :=
-    forall (new : d) (x : a),
-      view l (set l new x) = new.
-
-  (* Setting what you just viewed changes nothing *)
-  Definition law_set_view : Prop :=
-    forall (x : a),
-      set l (view l x) x = x.
-
-  (* Two sets at the same focus, last wins *)
-  Definition law_set_set : Prop :=
-    forall (u v : d) (x : a),
-      set l v (set l u x) = set l v x.
-
-  (* over is determined by view and set *)
-  Definition law_over_spec : Prop :=
-    forall (f : c -> d) (x : a),
-      over l f x = set l (f (view l x)) x.
-
-  Record LensLaws : Prop :=
-    { lens_view_set : law_view_set
-    ; lens_set_view : law_set_view
-    ; lens_set_set  : law_set_set
-    ; lens_over_spec : law_over_spec
-    }.
 End LensLaws.
 
 Section LenticularRelationLaws.
-  Context {a b c d : Type} (lr : LenticularRelation a b c d).
+  Context {a c : Type} (lr : LenticularRelation a a c c).
 
   (* Viewing is deterministic: if you can view x as both u and v, they're equal *)
   Definition law_r_view_det : Prop :=
@@ -160,3 +179,17 @@ Section LensToLenticular.
       rewrite ll.(lens_view_set). reflexivity.
   Qed.
 End LensToLenticular.
+Module LensNotations.
+  Declare Scope lens_scope.
+  Delimit Scope lens_scope with lens.
+  Bind Scope lens_scope with Lens.
+
+  Notation "X -l> Y" := (Simple X Y)
+    (at level 99, Y at level 200, right associativity) : type_scope.
+  Notation "a & b" := (b a) (at level 50, only parsing, left associativity) : lens_scope.
+  Notation "a %= f" := (Lens.over a f) (at level 49, left associativity) : lens_scope.
+  Notation "a .= b" := (Lens.set a b) (at level 49, left associativity) : lens_scope.
+  Notation "a .^ f" := (Lens.view f a) (at level 45, left associativity) : lens_scope.
+  (* level 19 to be compatible with Iris .@ *)
+  Notation "a .@ b" := (lens_compose a b) (at level 19, left associativity) : lens_scope.
+End LensNotations.
