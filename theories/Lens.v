@@ -4,16 +4,17 @@ Record Polymorphic (a b c d : Type) : Type := {
   view : a -> c;
   set : d -> a -> b
 }.
+Arguments view {_ _ _ _} _ _.
+Arguments set {_ _ _ _} _ _ _.
 
 Definition Simple (a c : Type) : Type := Polymorphic a a c c.
 
 Record Relational (a b c d : Type) : Type := {
   r_view : a -> c -> Prop;
-  r_over : d -> a -> b -> Prop
+  r_set : d -> a -> b -> Prop
 }.
-
-Arguments view {_ _ _ _} _ _.
-Arguments set {_ _ _ _} _ _ _.
+Arguments r_view {_ _ _ _} _ _.
+Arguments r_set {_ _ _ _} _ _ _.
 
 Definition compose {a b c d e f : Type}
            (l0 : Polymorphic a b c d) (l1 : Polymorphic c d e f)
@@ -90,10 +91,133 @@ Proof.
     reflexivity.
 Qed.
 
-End LensLaws.
+Section Counterexample.
+(* A = option bool * bool,  l0 focuses on the first component,
+   l1 focuses on the second but twists the first via a 3-cycle *)
 
+(*  sigma v w = identity when v = w
+    sigma false true  = (None ↦ Some false ↦ Some true ↦ None)  (3-cycle)
+    sigma true  false = its inverse                              *)
+Definition sigma (v w : bool) (u : option bool) : option bool :=
+  match v, w with
+  | false, true  => match u with
+                    | None       => Some false
+                    | Some false => Some true
+                    | Some true  => None
+                    end
+  | true,  false => match u with
+                    | None       => Some true
+                    | Some true  => Some false
+                    | Some false => None
+                    end
+  | _,     _     => u
+  end.
+
+Definition l0 : Simple (option bool * bool) (option bool) :=
+  {| view := fst
+   ; set  := fun w x => (w, snd x) |}.
+
+Definition l1 : Simple (option bool * bool) bool :=
+  {| view := snd
+   ; set  := fun w x => (sigma (snd x) w (fst x), w) |}.
+
+Lemma lawful_l0 : Lawful l0.
+Proof.
+  constructor.
+  - intros new [u v]; reflexivity.
+  - intros [u v]; reflexivity.
+  - intros u v [a b]; reflexivity.
+Qed.
+
+(* set_set relies on the cocycle condition sigma w w' (sigma v w u) = sigma v w' u,
+   proved by exhaustive case analysis on the 2*2*2*3 = 24 cases *)
+Lemma lawful_l1 : Lawful l1.
+Proof.
+  constructor.
+  - intros new [u v]; reflexivity.
+  - intros [u v]; destruct u as [[]|], v; reflexivity.
+  - intros u v [a b]; destruct u, v, a as [[]|], b; reflexivity.
+Qed.
+
+(* The product view is (a,b)↦(a,b) and setter ignores the old value entirely,
+   so it is the full-replacement (bijective) lens on option bool * bool *)
+Lemma lawful_product_l0_l1 : Lawful (product l0 l1).
+Proof.
+  constructor.
+  - intros [u v] [a b]; reflexivity.
+  - intros [a b]; destruct a as [[]|], b; reflexivity.
+  - intros [u u'] [v v'] [a b]; reflexivity.
+Qed.
+
+Lemma not_lawful_product_l1_l0 : ~ Lawful (product l1 l0).
+Proof.
+  intro H.
+  specialize (view_set H (true, None) (None, false)).
+  simpl; discriminate.
+Qed.
+
+(* The product is also bijective: setting the viewed value gives the same result
+   regardless of the starting point *)
+Lemma strong_set_view_product : strong_set_view' (product l0 l1).
+Proof.
+  intros [a b] [a' b']; destruct a as [[]|], b; reflexivity.
+Qed.
+
+(* Despite all of the above, the two lenses do not commute:
+   set l0 (Some false) (set l1 true  (None, false)) = (Some false, true)
+   set l1 true  (set l0 (Some false) (None, false)) = (Some true,  true) *)
+Lemma not_commutative_l0_l1 : ~ commutative l0 l1.
+Proof.
+  unfold commutative; intro H.
+  specialize (H (None, false) (Some false) true).
+  simpl in H; discriminate.
+Qed.
+
+End Counterexample.
+
+Section BothLawfulImpliesCommutative.
+Context {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c').
+Context (hl0 : Lawful l0) (hl1 : Lawful l1).
+Context (hp01 : Lawful (product l0 l1)) (hp10 : Lawful (product l1 l0)).
+
+(* set l0 cannot disturb l1's view *)
+Lemma ind_01 : forall (u : c) (x : a), view l1 (set l0 u x) = view l1 x.
+Proof.
+  intros u x.
+  pose proof (view_set hp01 (u, view l1 x) x) as H; simpl in H.
+  rewrite (set_view hl1 x) in H.
+  exact (f_equal snd H).
+Qed.
+
+(* set l1 cannot disturb l0's view *)
+Lemma ind_10 : forall (v : c') (x : a), view l0 (set l1 v x) = view l0 x.
+Proof.
+  intros v x.
+  pose proof (view_set hp10 (v, view l0 x) x) as H; simpl in H.
+  rewrite (set_view hl0 x) in H.
+  exact (f_equal snd H).
+Qed.
+
+Theorem both_products_lawful_commutative : commutative l0 l1.
+Proof.
+  unfold commutative; intros x v u.
+  (* view l0 (set l1 u (set l0 v x)) = v,  from snd of view_set of product l1 l0 *)
+  pose proof (f_equal snd (view_set hp10 (u, v) x)) as Hiv; simpl in Hiv.
+  (* (v): set l0 v (set l1 u (set l0 v x)) = set l1 u (set l0 v x) *)
+  pose proof (set_view hl0 (set l1 u (set l0 v x))) as Hsv0.
+  rewrite Hiv in Hsv0.
+  (* (C): set l0 v (set l1 u (set l0 v x)) = set l0 v (set l1 u x) *)
+  pose proof (set_set hp01 (v, view l1 x) (v, u) x) as Hss01; simpl in Hss01.
+  rewrite (set_view hl1 x) in Hss01.
+  (* (v) and (C) share their LHS, so the RHSes are equal *)
+  rewrite <- Hss01; exact Hsv0.
+Qed.
+
+End BothLawfulImpliesCommutative.
+
+(*
 Section LenticularRelationLaws.
-  Context {a c : Type} (lr : LenticularRelation a a c c).
+  Context {a c : Type} (lr : Relational a a c c).
 
   (* Viewing is deterministic: if you can view x as both u and v, they're equal *)
   Definition law_r_view_det : Prop :=
@@ -193,3 +317,4 @@ Module LensNotations.
   (* level 19 to be compatible with Iris .@ *)
   Notation "a .@ b" := (lens_compose a b) (at level 19, left associativity) : lens_scope.
 End LensNotations.
+ *)
