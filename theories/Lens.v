@@ -1,3 +1,5 @@
+From Coq Require Import Setoids.Setoid.
+
 Set Primitive Projections.
 
 Record Polymorphic (a b c d : Type) : Type := {
@@ -33,36 +35,27 @@ Definition product {a c c' : Type}
 Definition over {a b c d : Type} (l : Polymorphic a b c d) (f : c -> d) : a -> b :=
   fun x => set l (f (view l x)) x.
 
-(* Viewing what you just set gives back the new value *)
-Definition view_set' {a c : Type} (l : Simple a c) : Prop :=
-  forall (new : c) (x : a),
-    view l (set l new x) = new.
-
-(* Setting what you just viewed changes nothing *)
-Definition set_view' {a c : Type} (l : Simple a c) : Prop :=
-  forall (x : a),
-    set l (view l x) x = x.
+Record Lawful {a c : Type} (l : Simple a c) : Prop :=
+  { view_set :
+      (* Viewing what you just set gives back the new value *)
+      forall (new : c) (x : a), view l (set l new x) = new
+  ; set_view :
+      (* Setting what you just viewed changes nothing *)
+      forall (x : a), set l (view l x) x = x
+  ; set_set  :
+      (* Two sets at the same focus, last wins *)
+      forall (u v : c) (x : a), set l v (set l u x) = set l v x
+  }.
 
 (* The view completely determines the source, present in bijective lenses *)
-Definition strong_set_view' {a c : Type} (l : Simple a c) : Prop :=
+Definition strong_set_view {a c : Type} (l : Simple a c) : Prop :=
   forall (x x' : a),
     set l (view l x) x' = x.
-
-(* Two sets at the same focus, last wins *)
-Definition set_set' {a c : Type} (l : Simple a c) : Prop :=
-  forall (u v : c) (x : a),
-    set l v (set l u x) = set l v x.
 
 (* over is determined by view and set *)
 Definition over_spec' {a c : Type} (l : Simple a c) : Prop :=
   forall (f : c -> c) (x : a),
     over l f x = set l (f (view l x)) x.
-
-Record Lawful {a c : Type} (l : Simple a c) : Prop :=
-  { view_set : @view_set' a c l
-  ; set_view : @set_view' a c l
-  ; set_set  : @set_set' a c l
-  }.
 
 Arguments view_set {a c l}.
 Arguments set_view {a c l}.
@@ -72,8 +65,8 @@ Definition commutative {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Pr
   forall (x : a) (v : c) (u : c'),
     set l0 v (set l1 u x) = set l1 u (set l0 v x).
 
-Definition independent_view_over {a c : Type} (l0 l1 : Simple a c) : Prop :=
-  forall (x : a) (u : c),
+Definition independent_view_set {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Prop :=
+  forall (x : a) (u : c'),
     view l0 (set l1 u x) = view l0 x.
 
 Theorem lawful_product {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
@@ -81,14 +74,91 @@ Theorem lawful_product {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
   Lawful (product l0 l1).
 Proof.
   apply Build_Lawful.
-  - unfold view_set'. intros [u v] x. simpl. f_equal.
+  - intros [u v] x. simpl. f_equal.
     + apply (view_set lawful0).
     + rewrite compatible. apply (view_set lawful1).
-  - unfold set_view'. intros x. simpl. rewrite (set_view lawful1).
+  - intros x. simpl. rewrite (set_view lawful1).
     apply (set_view lawful0). 
-  - unfold set_set'. intros [u u'] [v v'] x. simpl.
+  - intros [u u'] [v v'] x. simpl.
     rewrite <- compatible. rewrite (set_set lawful1). rewrite (set_set lawful0).
     reflexivity.
+Qed.
+
+Theorem commutative_independent {a c c' : Type} {l0 : Simple a c} {l1 : Simple a c'}
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
+  independent_view_set l0 l1.
+Proof.
+  unfold commutative in compatible.
+  unfold independent_view_set. intros x u.
+  pose proof (set_view lawful0).
+  rewrite <- (set_view lawful0 x) at 1.
+  rewrite <- compatible. apply (view_set lawful0).
+Qed.
+
+Theorem independent_commutative {a c c' : Type} {l0 : Simple a c} {l1 : Simple a c'}
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : independent_view_set l0 l1) :
+  commutative l0 l1.
+Proof.
+  unfold commutative. unfold independent_view_set in compatible.
+  intros x v u.
+  rewrite <- (set_view lawful0 (set l1 u (set l0 v x))).
+  rewrite compatible.
+Abort.
+
+Definition join {a c c' d : Type}
+  (l0 : Simple a c) (l1 : Simple a c') (l2 : Simple a d) : Prop :=
+  (forall x x': a,
+  ((view l0 x = view l0 x') /\ (view l1 x = view l1 x')) <-> view l2 x = view l2 x')
+  /\ (commutative l0 l1).
+
+Theorem exists_join {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
+  exists (d : Type) (l2 : Simple a d), join l0 l1 l2.
+Proof.
+Admitted.
+
+Definition join_dual {a c c' d : Type}
+  {l0 : Simple a c} {l1 : Simple a c'} {l2 : Simple a d} :
+  join l0 l1 l2 ->
+  forall v0 v1 v2 x,
+    (set l0 v0 (set l1 v1 x) = set l2 v2 x)
+    <->
+    (v0 = view l0 (set l2 v2 x) /\ v1 = view l1 (set l2 v2 x)).
+Proof.
+Admitted.
+
+Definition observed {a c d : Type}
+  (smaller : Simple a c) (bigger : Simple a d) : Prop :=
+  exists (c' : Type) (witness : Simple a c'), Lawful witness /\ join smaller witness bigger.
+
+Theorem set_of_join {a c c' d : Type}
+  (l0 : Simple a c) (l1 : Simple a c') (l2 : Simple a d)
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (lawful2 : Lawful l2)
+  (compatible : join l0 l1 l2) :
+  forall v x,
+    let x' := (set l2 v x) in
+    x' = set l0 (view l0 x') (set l1 (view l1 x') x).
+Proof.
+Admitted.
+
+Lemma observed_set {a c d : Type}
+  {smaller : Simple a c} {bigger : Simple a d}
+  (bounded : observed smaller bigger) : forall v x,
+  set smaller v x = set bigger (view bigger (set smaller v x)) x.
+Proof.
+Admitted.
+
+Theorem observed_independent {a b c d : Type}
+  (l0 : Simple a b) (l1 : Simple a c) (l2 : Simple a d)
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (lawful2 : Lawful l2)
+  (bounded : observed l0 l1) (compatible : commutative l1 l2) : independent_view_set l0 l2.
+Proof.
+  unfold independent_view_set. intros x u.
+  pose proof bounded as bounded'.
+  destruct bounded as [c' [witness [lawful_witness [H_view H_compatible]]]].
+  assert (view l1 (set l2 u x) = view l1 x) by
+    (apply commutative_independent; assumption).
+  rewrite <- H_view in H. destruct H. apply H.
 Qed.
 
 Section Counterexample.
