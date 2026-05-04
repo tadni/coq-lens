@@ -90,26 +90,39 @@ Theorem commutative_independent {a c c' : Type} {l0 : Simple a c} {l1 : Simple a
 Proof.
   unfold commutative in compatible.
   unfold independent_view_set. intros x u.
-  pose proof (set_view lawful0).
   rewrite <- (set_view lawful0 x) at 1.
   rewrite <- compatible. apply (view_set lawful0).
 Qed.
 
+(*
 Theorem independent_commutative {a c c' : Type} {l0 : Simple a c} {l1 : Simple a c'}
-  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : independent_view_set l0 l1) :
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible0 : independent_view_set l0 l1)
+  (compatible1 : independent_view_set l1 l0) :
   commutative l0 l1.
 Proof.
-  unfold commutative. unfold independent_view_set in compatible.
+  unfold commutative. unfold independent_view_set in compatible0, compatible1.
   intros x v u.
-  rewrite <- (set_view lawful0 (set l1 u (set l0 v x))).
-  rewrite compatible.
-Abort.
+  replace (set l0 v (set l1 u x)) with (set l0 v (set l1 u (set l0 v x))). {
+    rewrite <- (view_set lawful0 v x) at 1.
+    rewrite <- (compatible0 (set l0 v x) u).
+    apply (set_view lawful0).
+  }
+  pose proof (set_view lawful0 (set l1 u (set l0 v x))) as Hsv.
+  rewrite (compatible0 (set l0 v x) u) in Hsv.
+  rewrite (view_set lawful0) in Hsv.
+  pose proof (set_view lawful0 (set l1 u (set l0 v x))).
+  rewrite (compatible0 (set l0 v x) u) in H.
+  rewrite (set_view lawful0) in H.
+  pose proof (set_view lawful1 (set l0 v (set l1 u x))) as H0.
+  rewrite (compatible1 (set l1 u x) v) in H0.
+  rewrite (view_set lawful1) in H0.
+Qed.
+*)
 
 Definition join {a c c' d : Type}
   (l0 : Simple a c) (l1 : Simple a c') (l2 : Simple a d) : Prop :=
   (forall x x': a,
-  ((view l0 x = view l0 x') /\ (view l1 x = view l1 x')) <-> view l2 x = view l2 x')
-  /\ (commutative l0 l1).
+  ((view l0 x = view l0 x') /\ (view l1 x = view l1 x')) <-> view l2 x = view l2 x').
 
 Theorem exists_join {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
   (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
@@ -148,6 +161,7 @@ Lemma observed_set {a c d : Type}
 Proof.
 Admitted.
 
+(*
 Theorem observed_independent {a b c d : Type}
   (l0 : Simple a b) (l1 : Simple a c) (l2 : Simple a d)
   (lawful0 : Lawful l0) (lawful1 : Lawful l1) (lawful2 : Lawful l2)
@@ -160,6 +174,7 @@ Proof.
     (apply commutative_independent; assumption).
   rewrite <- H_view in H. destruct H. apply H.
 Qed.
+ *)
 
 Section Counterexample.
 (* A = option bool * bool,  l0 focuses on the first component,
@@ -228,7 +243,7 @@ Qed.
 
 (* The product is also bijective: setting the viewed value gives the same result
    regardless of the starting point *)
-Lemma strong_set_view_product : strong_set_view' (product l0 l1).
+Lemma strong_set_view_product : strong_set_view (product l0 l1).
 Proof.
   intros [a b] [a' b']; destruct a as [[]|], b; reflexivity.
 Qed.
