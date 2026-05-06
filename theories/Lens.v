@@ -1,4 +1,4 @@
-From Coq Require Import Setoids.Setoid.
+From Coq Require Setoids.Setoid.
 
 Set Primitive Projections.
 
@@ -24,7 +24,7 @@ Definition compose {a b c d e f : Type}
 {| view := fun x : a => view l1 (view l0 x)
  ; set := fun (u : f) (x : a) => set l0 (set l1 u (view l0 x)) x |}.
 
-Definition product {a c c' : Type}
+Definition coproduct {a c c' : Type}
            (l0 : Simple a c) (l1 : Simple a c')
            : Simple a (c * c') :=
 {| view := fun x : a => (view l0 x, view l1 x)
@@ -46,6 +46,13 @@ Record Lawful {a c : Type} (l : Simple a c) : Prop :=
       (* Two sets at the same focus, last wins *)
       forall (u v : c) (x : a), set l v (set l u x) = set l v x
   }.
+Arguments view_set {a c l}.
+Arguments set_view {a c l}.
+Arguments set_set {a c l}.
+
+Definition commutative {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Prop :=
+  forall (x : a) (v : c) (u : c'),
+    set l0 v (set l1 u x) = set l1 u (set l0 v x).
 
 (* The view completely determines the source, present in bijective lenses *)
 Definition strong_set_view {a c : Type} (l : Simple a c) : Prop :=
@@ -57,21 +64,19 @@ Definition over_spec' {a c : Type} (l : Simple a c) : Prop :=
   forall (f : c -> c) (x : a),
     over l f x = set l (f (view l x)) x.
 
-Arguments view_set {a c l}.
-Arguments set_view {a c l}.
-Arguments set_set {a c l}.
-
-Definition commutative {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Prop :=
-  forall (x : a) (v : c) (u : c'),
-    set l0 v (set l1 u x) = set l1 u (set l0 v x).
-
 Definition independent_view_set {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c') : Prop :=
   forall (x : a) (u : c'),
     view l0 (set l1 u x) = view l0 x.
 
+Theorem lawful_composition {a c d : Type} {l0 : Simple a c} {l1 : Simple c d}
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) :
+  Lawful (compose l0 l1).
+Proof.
+Admitted.
+
 Theorem lawful_product {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
   (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
-  Lawful (product l0 l1).
+  Lawful (coproduct l0 l1).
 Proof.
   apply Build_Lawful.
   - intros [u v] x. simpl. f_equal.
@@ -94,35 +99,28 @@ Proof.
   rewrite <- compatible. apply (view_set lawful0).
 Qed.
 
-(*
-Theorem independent_commutative {a c c' : Type} {l0 : Simple a c} {l1 : Simple a c'}
-  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible0 : independent_view_set l0 l1)
-  (compatible1 : independent_view_set l1 l0) :
-  commutative l0 l1.
+Theorem commutative_symmetric {a c c' : Type} {l0 : Simple a c} {l1 : Simple a c'}
+  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
+  commutative l1 l0.
 Proof.
-  unfold commutative. unfold independent_view_set in compatible0, compatible1.
-  intros x v u.
-  replace (set l0 v (set l1 u x)) with (set l0 v (set l1 u (set l0 v x))). {
-    rewrite <- (view_set lawful0 v x) at 1.
-    rewrite <- (compatible0 (set l0 v x) u).
-    apply (set_view lawful0).
-  }
-  pose proof (set_view lawful0 (set l1 u (set l0 v x))) as Hsv.
-  rewrite (compatible0 (set l0 v x) u) in Hsv.
-  rewrite (view_set lawful0) in Hsv.
-  pose proof (set_view lawful0 (set l1 u (set l0 v x))).
-  rewrite (compatible0 (set l0 v x) u) in H.
-  rewrite (set_view lawful0) in H.
-  pose proof (set_view lawful1 (set l0 v (set l1 u x))) as H0.
-  rewrite (compatible1 (set l1 u x) v) in H0.
-  rewrite (view_set lawful1) in H0.
+  unfold commutative in *.
+  intros. symmetry. apply compatible.
 Qed.
-*)
+
+Definition equivalent {a d : Type}
+  (l0 : Simple a d) (l1 : Simple a d) : Prop :=
+  (forall x, view l0 x = view l1 x)
+  /\ (forall v x, set l0 v x = set l1 v x).
+
+Definition observed {a c d : Type}
+  (smaller : Simple a c) (bigger : Simple a d) : Prop :=
+  exists (witness : Simple d c), Lawful witness /\ equivalent smaller (compose bigger witness).
 
 Definition join {a c c' d : Type}
   (l0 : Simple a c) (l1 : Simple a c') (l2 : Simple a d) : Prop :=
-  (forall x x': a,
-  ((view l0 x = view l0 x') /\ (view l1 x = view l1 x')) <-> view l2 x = view l2 x').
+  (observed l0 l2) /\ (observed l1 l2)
+  /\ (forall e (l3 : Simple a e),
+       (observed l0 l3 /\ observed l1 l3) -> observed l2 l3).
 
 Theorem exists_join {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
   (lawful0 : Lawful l0) (lawful1 : Lawful l1) (compatible : commutative l0 l1) :
@@ -130,51 +128,19 @@ Theorem exists_join {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
 Proof.
 Admitted.
 
-Definition join_dual {a c c' d : Type}
-  {l0 : Simple a c} {l1 : Simple a c'} {l2 : Simple a d} :
-  join l0 l1 l2 ->
-  forall v0 v1 v2 x,
-    (set l0 v0 (set l1 v1 x) = set l2 v2 x)
-    <->
-    (v0 = view l0 (set l2 v2 x) /\ v1 = view l1 (set l2 v2 x)).
-Proof.
-Admitted.
-
-Definition observed {a c d : Type}
-  (smaller : Simple a c) (bigger : Simple a d) : Prop :=
-  exists (c' : Type) (witness : Simple a c'), Lawful witness /\ join smaller witness bigger.
-
-Theorem set_of_join {a c c' d : Type}
-  (l0 : Simple a c) (l1 : Simple a c') (l2 : Simple a d)
-  (lawful0 : Lawful l0) (lawful1 : Lawful l1) (lawful2 : Lawful l2)
-  (compatible : join l0 l1 l2) :
-  forall v x,
-    let x' := (set l2 v x) in
-    x' = set l0 (view l0 x') (set l1 (view l1 x') x).
-Proof.
-Admitted.
-
-Lemma observed_set {a c d : Type}
-  {smaller : Simple a c} {bigger : Simple a d}
-  (bounded : observed smaller bigger) : forall v x,
-  set smaller v x = set bigger (view bigger (set smaller v x)) x.
-Proof.
-Admitted.
-
-(*
 Theorem observed_independent {a b c d : Type}
   (l0 : Simple a b) (l1 : Simple a c) (l2 : Simple a d)
   (lawful0 : Lawful l0) (lawful1 : Lawful l1) (lawful2 : Lawful l2)
-  (bounded : observed l0 l1) (compatible : commutative l1 l2) : independent_view_set l0 l2.
+  (bounded : observed l0 l1) (compatible : commutative l1 l2) : commutative l0 l2.
 Proof.
-  unfold independent_view_set. intros x u.
-  pose proof bounded as bounded'.
-  destruct bounded as [c' [witness [lawful_witness [H_view H_compatible]]]].
-  assert (view l1 (set l2 u x) = view l1 x) by
-    (apply commutative_independent; assumption).
-  rewrite <- H_view in H. destruct H. apply H.
+  unfold commutative. intros x v u.
+  unfold observed in bounded.
+  destruct bounded as [witness [lawful_witness l0_to_l1]].
+  apply proj2 in l0_to_l1.
+  rewrite l0_to_l1. rewrite l0_to_l1.
+  simpl. rewrite (commutative_independent lawful1 lawful2 compatible).
+  rewrite compatible. reflexivity.
 Qed.
- *)
 
 Section Counterexample.
 (* A = option bool * bool,  l0 focuses on the first component,
@@ -224,9 +190,9 @@ Proof.
   - intros u v [a b]; destruct u, v, a as [[]|], b; reflexivity.
 Qed.
 
-(* The product view is (a,b)↦(a,b) and setter ignores the old value entirely,
+(* The coproduct view is (a,b)↦(a,b) and setter ignores the old value entirely,
    so it is the full-replacement (bijective) lens on option bool * bool *)
-Lemma lawful_product_l0_l1 : Lawful (product l0 l1).
+Lemma lawful_product_l0_l1 : Lawful (coproduct l0 l1).
 Proof.
   constructor.
   - intros [u v] [a b]; reflexivity.
@@ -234,16 +200,16 @@ Proof.
   - intros [u u'] [v v'] [a b]; reflexivity.
 Qed.
 
-Lemma not_lawful_product_l1_l0 : ~ Lawful (product l1 l0).
+Lemma not_lawful_product_l1_l0 : ~ Lawful (coproduct l1 l0).
 Proof.
   intro H.
   specialize (view_set H (true, None) (None, false)).
   simpl; discriminate.
 Qed.
 
-(* The product is also bijective: setting the viewed value gives the same result
+(* The coproduct is also bijective: setting the viewed value gives the same result
    regardless of the starting point *)
-Lemma strong_set_view_product : strong_set_view (product l0 l1).
+Lemma strong_set_view_product : strong_set_view (coproduct l0 l1).
 Proof.
   intros [a b] [a' b']; destruct a as [[]|], b; reflexivity.
 Qed.
@@ -263,7 +229,7 @@ End Counterexample.
 Section BothLawfulImpliesCommutative.
 Context {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c').
 Context (hl0 : Lawful l0) (hl1 : Lawful l1).
-Context (hp01 : Lawful (product l0 l1)) (hp10 : Lawful (product l1 l0)).
+Context (hp01 : Lawful (coproduct l0 l1)) (hp10 : Lawful (coproduct l1 l0)).
 
 (* set l0 cannot disturb l1's view *)
 Lemma ind_01 : forall (u : c) (x : a), view l1 (set l0 u x) = view l1 x.
@@ -286,7 +252,7 @@ Qed.
 Theorem both_products_lawful_commutative : commutative l0 l1.
 Proof.
   unfold commutative; intros x v u.
-  (* view l0 (set l1 u (set l0 v x)) = v,  from snd of view_set of product l1 l0 *)
+  (* view l0 (set l1 u (set l0 v x)) = v,  from snd of view_set of coproduct l1 l0 *)
   pose proof (f_equal snd (view_set hp10 (u, v) x)) as Hiv; simpl in Hiv.
   (* (v): set l0 v (set l1 u (set l0 v x)) = set l1 u (set l0 v x) *)
   pose proof (set_view hl0 (set l1 u (set l0 v x))) as Hsv0.
@@ -300,106 +266,199 @@ Qed.
 
 End BothLawfulImpliesCommutative.
 
-(*
-Section LenticularRelationLaws.
-  Context {a c : Type} (lr : Relational a a c c).
+Definition to_relational {a b c d : Type} (l : Polymorphic a b c d) : Relational a b c d :=
+  {| r_view := fun x y => view l x = y
+   ; r_set  := fun v x y => set l v x = y
+  |}.
 
-  (* Viewing is deterministic: if you can view x as both u and v, they're equal *)
-  Definition law_r_view_det : Prop :=
-    forall (x : a) (u v : c),
-      r_view lr x u -> r_view lr x v -> u = v.
+Definition RelationalSimple (a c : Type) : Type := Relational a a c c.
 
-  (* Every element has something to view *)
-  Definition law_r_view_total : Prop :=
-    forall (x : a), exists (u : c), r_view lr x u.
+Definition relational_compose {a b c d e f : Type}
+    (l0 : Relational a b c d) (l1 : Relational c d e f)
+    : Relational a b e f :=
+  {| r_view := fun (x : a) (z : e) =>
+       exists (y : c), r_view l0 x y /\ r_view l1 y z
+   ; r_set  := fun (u : f) (x : a) (y : b) =>
+       exists (v : d),
+         (exists (w : c), r_view l0 x w /\ r_set l1 u w v)
+         /\ r_set l0 v x y
+  |}.
 
-  (* PutGet: if you update with a relation that maps c to d,
-     the viewed result of the new state is related to the old focus *)
-  Definition law_r_view_over : Prop :=
-    forall (f : c -> d -> Prop) (x : a) (y : b) (u : c) (v : d),
-      r_view lr x u ->
-      f u v ->
-      r_over lr f x y ->
-      r_view lr y v.
+Definition relational_product {a c c' : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c')
+    : RelationalSimple a (c * c') :=
+  {| r_view := fun (x : a) (p : c * c') =>
+       r_view l0 x (fst p) /\ r_view l1 x (snd p)
+   ; r_set  := fun (p : c * c') (x y : a) =>
+       exists (mid : a), r_set l1 (snd p) x mid /\ r_set l0 (fst p) mid y
+  |}.
 
-  (* GetPut: updating with the identity relation changes nothing *)
-  Definition law_r_over_id : Prop :=
-    forall (x : a) (y : b),
-      r_over lr (fun u v => u = v) x y ->
-      x = y.
+Definition relational_over {a b c d : Type}
+    (l : Relational a b c d) (f : c -> d -> Prop) : a -> b -> Prop :=
+  fun x y => exists u v, r_view l x u /\ f u v /\ r_set l v x y.
 
-  (* PutPut: two updates composed equals the second update *)
-  Definition law_r_over_over : Prop :=
-    forall (f g : c -> d -> Prop) (x : a) (y z : b),
-      r_over lr f x y ->
-      r_over lr g y z ->
-      r_over lr (fun u w => exists v, f u v /\ g v w) x z.
+Record RelationalLawful {a c : Type} (l : RelationalSimple a c) : Prop :=
+  { relational_view_set :
+      (* Setting to a focus makes that focus a possible view of the result *)
+      forall (focus : c) (source result : a),
+        r_set l focus source result -> r_view l result focus
+  ; relational_set_view :
+      (* Setting a focus you can already view leaves the source reachable *)
+      forall (source : a) (focus : c),
+        r_view l source focus -> r_set l focus source source
+  ; relational_set_set :
+      (* Two sequential sets: the intermediate focus is irrelevant *)
+      forall (focus focus' : c) (x y z : a),
+        r_set l focus x y -> r_set l focus' y z -> r_set l focus' x z
+  }.
+Arguments relational_view_set {a c l}.
+Arguments relational_set_view {a c l}.
+Arguments relational_set_set {a c l}.
 
-  (* Locality: over only affects the focus *)
-  Definition law_r_over_local : Prop :=
-    forall (f : c -> d -> Prop) (x : a) (y : b) (u : c),
-      r_view lr x u ->
-      r_over lr f x y ->
-      exists v, f u v /\ r_view lr y v.
+(* The possible two-step results are order-independent *)
+Definition relational_commutative {a c c' : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c') : Prop :=
+  forall (origin terminus : a) (focus : c) (focus' : c'),
+    (exists (mid : a), r_set l1 focus' origin mid /\ r_set l0 focus mid terminus) <->
+    (exists (mid : a), r_set l0 focus origin mid /\ r_set l1 focus' mid terminus).
 
-  Record LenticularRelationLaws : Prop :=
-    { lr_view_det   : law_r_view_det
-    ; lr_view_total : law_r_view_total
-    ; lr_view_over  : law_r_view_over
-    ; lr_over_id    : law_r_over_id
-    ; lr_over_over  : law_r_over_over
-    ; lr_over_local : law_r_over_local
-    }.
-End LenticularRelationLaws.
+(* The view alone determines the whole source, as in bijective lenses *)
+Definition relational_strong_set_view {a c : Type} (l : RelationalSimple a c) : Prop :=
+  forall (source anchor : a) (focus : c),
+    r_view l source focus -> r_set l focus anchor source.
 
-Section LensToLenticular.
-  (* Every lawful lens gives rise to a lawful lenticular relation *)
-  Context {a b c d : Type} (l : Lens a b c d) (ll : LensLaws l).
+(* relational_over is determined by r_view and r_set — holds by definition *)
+Definition relational_over_specification {a c : Type} (l : RelationalSimple a c) : Prop :=
+  forall (f : c -> c -> Prop) (x y : a),
+    relational_over l f x y <-> exists u v, r_view l x u /\ f u v /\ r_set l v x y.
 
-  Definition lens_to_lenticular : LenticularRelation a b c d :=
-    {| r_view := fun x u => view l x = u
-     ; r_over := fun f x y => exists u v, view l x = u /\ f u v /\ set l v x = y
-    |}.
+(* Setting through l1 carries l0-views forward from source to result *)
+Definition relational_independent_view_set {a c c' : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c') : Prop :=
+  forall (source result : a) (focus' : c') (focus : c),
+    r_set l1 focus' source result -> r_view l0 source focus -> r_view l0 result focus.
 
-  Lemma lens_to_lenticular_laws : LenticularRelationLaws lens_to_lenticular.
-  Proof.
-    constructor; unfold lens_to_lenticular; simpl.
-    - (* view_det *) intros x u v <- <-. reflexivity.
-    - (* view_total *) intros x. exists (view l x). reflexivity.
-    - (* view_over *)
-      intros f x y u v Hu Hf (u' & v' & Hu' & Hf' & <-).
-      rewrite <- Hu in Hu'. rewrite <- Hu'.
-      rewrite ll.(lens_view_set). congruence.
-    - (* over_id *)
-      intros x y (u & v & Hu & <- & Hy).
-      rewrite <- ll.(lens_set_view). rewrite <- Hu. exact Hy.
-    - (* over_over *)
-      intros f g x y z (u & v & Hu & Hf & <-) (u' & w & Hu' & Hg & <-).
-      exists u, w.
-      rewrite ll.(lens_view_set) in Hu'.
-      split. exact Hu.
-      split. exists v. exact (conj Hf (Hu' ▸ Hg)).
-      rewrite ll.(lens_set_set). congruence.
-    - (* over_local *)
-      intros f x y u Hu (u' & v & Hu' & Hf & <-).
-      exists v.
-      rewrite <- Hu in Hu'.
-      split. congruence.
-      rewrite ll.(lens_view_set). reflexivity.
-  Qed.
-End LensToLenticular.
-Module LensNotations.
-  Declare Scope lens_scope.
-  Delimit Scope lens_scope with lens.
-  Bind Scope lens_scope with Lens.
+Theorem relational_lawful_composition {a c d : Type}
+    {l0 : RelationalSimple a c} {l1 : RelationalSimple c d}
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1) :
+    RelationalLawful (relational_compose l0 l1).
+Proof.
+Admitted.
 
-  Notation "X -l> Y" := (Simple X Y)
-    (at level 99, Y at level 200, right associativity) : type_scope.
-  Notation "a & b" := (b a) (at level 50, only parsing, left associativity) : lens_scope.
-  Notation "a %= f" := (Lens.over a f) (at level 49, left associativity) : lens_scope.
-  Notation "a .= b" := (Lens.set a b) (at level 49, left associativity) : lens_scope.
-  Notation "a .^ f" := (Lens.view f a) (at level 45, left associativity) : lens_scope.
-  (* level 19 to be compatible with Iris .@ *)
-  Notation "a .@ b" := (lens_compose a b) (at level 19, left associativity) : lens_scope.
-End LensNotations.
- *)
+Theorem relational_lawful_product {a c c' : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c')
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1)
+    (compatible : relational_commutative l0 l1) :
+    RelationalLawful (relational_product l0 l1).
+Proof.
+  apply Build_RelationalLawful.
+  - intros [focus focus'] source result [mid [Hset1 Hset0]]; simpl in *.
+    split.
+    + exact (relational_view_set lawful0 focus mid result Hset0).
+    + destruct (proj1 (compatible source result focus focus')
+                  (ex_intro _ mid (conj Hset1 Hset0))) as [mid' [_ Hset1']].
+      exact (relational_view_set lawful1 focus' mid' result Hset1').
+  - intros source [focus focus'] [Hview0 Hview1]; simpl in *.
+    exact (ex_intro _ source
+            (conj (relational_set_view lawful1 source focus' Hview1)
+                  (relational_set_view lawful0 source focus Hview0))).
+  - intros [focus focus'] [focus'' focus'''] x y z
+           [mid  [Hset1u Hset0u]]
+           [mid' [Hset1v Hset0v]]; simpl in *.
+    (* Commute the inner l0/l1 sets to untangle the four-step chain *)
+    destruct (proj2 (compatible mid mid' focus focus''')
+                (ex_intro _ y (conj Hset0u Hset1v))) as [mid'' [Hcomm1 Hcomm0]].
+    exact (ex_intro _ mid''
+            (conj (relational_set_set lawful1 focus' focus''' x mid mid'' Hset1u Hcomm1)
+                  (relational_set_set lawful0 focus focus'' mid'' mid' z Hcomm0 Hset0v))).
+Qed.
+
+Theorem relational_commutative_independent {a c c' : Type}
+    {l0 : RelationalSimple a c} {l1 : RelationalSimple a c'}
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1)
+    (compatible : relational_commutative l0 l1) :
+    relational_independent_view_set l0 l1.
+Proof.
+  unfold relational_independent_view_set.
+  intros source result focus' focus Hset Hview.
+  (* Reflect Hview into a set, then commute to get a set ending at result *)
+  destruct (proj2 (compatible source result focus focus')
+              (ex_intro _ source
+                (conj (relational_set_view lawful0 source focus Hview) Hset)))
+    as [mid [_ Hmid0]].
+  exact (relational_view_set lawful0 focus mid result Hmid0).
+Qed.
+
+Theorem relational_commutative_symmetric {a c c' : Type}
+    {l0 : RelationalSimple a c} {l1 : RelationalSimple a c'}
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1)
+    (compatible : relational_commutative l0 l1) :
+    relational_commutative l1 l0.
+Proof.
+  unfold relational_commutative in *.
+  intros origin terminus focus focus'.
+  exact (iff_sym (compatible origin terminus focus' focus)).
+Qed.
+
+Definition relational_equivalent {a d : Type}
+    (l0 : RelationalSimple a d) (l1 : RelationalSimple a d) : Prop :=
+  (forall (x : a) (y : d), r_view l0 x y <-> r_view l1 x y)
+  /\ (forall (focus : d) (x y : a), r_set l0 focus x y <-> r_set l1 focus x y).
+
+Definition relational_observed {a c d : Type}
+    (smaller : RelationalSimple a c) (bigger : RelationalSimple a d) : Prop :=
+  exists (witness : RelationalSimple d c),
+    RelationalLawful witness
+    /\ relational_equivalent smaller (relational_compose bigger witness).
+
+Definition relational_join {a c c' d : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c') (l2 : RelationalSimple a d) : Prop :=
+  relational_observed l0 l2
+  /\ relational_observed l1 l2
+  /\ forall e (l3 : RelationalSimple a e),
+       relational_observed l0 l3 /\ relational_observed l1 l3 -> relational_observed l2 l3.
+
+Theorem relational_exists_join {a c c' : Type}
+    (l0 : RelationalSimple a c) (l1 : RelationalSimple a c')
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1)
+    (compatible : relational_commutative l0 l1) :
+    exists (d : Type) (l2 : RelationalSimple a d), relational_join l0 l1 l2.
+Proof.
+Admitted.
+
+Theorem relational_observed_independent {a b c d : Type}
+    (l0 : RelationalSimple a b) (l1 : RelationalSimple a c) (l2 : RelationalSimple a d)
+    (lawful0 : RelationalLawful l0) (lawful1 : RelationalLawful l1) (lawful2 : RelationalLawful l2)
+    (bounded : relational_observed l0 l1) (compatible : relational_commutative l1 l2) :
+    relational_commutative l0 l2.
+Proof.
+Admitted.
+
+Theorem lawful_to_relational {a c : Type} (l : Simple a c) (lawful : Lawful l) :
+    RelationalLawful (to_relational l).
+Proof.
+  apply Build_RelationalLawful; simpl.
+  - (* relational_view_set: set l focus source = result → view l result = focus *)
+    intros focus source result Hset.
+    rewrite <- Hset. apply (view_set lawful).
+  - (* relational_set_view: view l source = focus → set l focus source = source *)
+    intros source focus Hview.
+    rewrite <- Hview. apply (set_view lawful).
+  - (* relational_set_set: set l focus x = y → set l focus' y = z → set l focus' x = z *)
+    intros focus focus' x y z Hset Hset'.
+    rewrite <- Hset', <- Hset. symmetry. apply (set_set lawful).
+Qed.
+
+Theorem commutative_to_relational {a c c' : Type} (l0 : Simple a c) (l1 : Simple a c')
+    (compatible : commutative l0 l1) :
+    relational_commutative (to_relational l0) (to_relational l1).
+Proof.
+  unfold relational_commutative; simpl.
+  intros origin terminus focus focus'. split.
+  - intros [mid [Hset1 Hset0]].
+    exists (set l0 focus origin). split; [reflexivity|].
+    rewrite <- Hset0, <- Hset1. symmetry. apply compatible.
+  - intros [mid [Hset0 Hset1]].
+    exists (set l1 focus' origin). split; [reflexivity|].
+    rewrite <- Hset1, <- Hset0. apply compatible.
+Qed.
