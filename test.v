@@ -1,5 +1,5 @@
-From Lens Require Import Lens.
-From Lens.TC Require Import TC.
+From Lens Require Lens.
+From Lens.TC Require TC.
 From MetaCoq.Template Require Import All.
 From MetaCoq.Utils Require Import utils monad_utils.
 
@@ -11,7 +11,7 @@ Record Pair (A B : Type) := {
   fst' : A ;
   snd' : B ;
 }.
-MetaCoq Run (genLensN "Pair").
+MetaCoq Run (TC.genLensN "Pair").
 Arguments fst' {_ _}.
 Arguments snd' {_ _}.
 Arguments _fst' {_ _}.
@@ -21,50 +21,50 @@ About _fst'.
 About _snd'.
 
 (* Basic view tests *)
-Example view_fst : view _fst' {| fst' := 1 ; snd' := true |} = 1.
+Example view_fst : Lens.view _fst' {| fst' := 1 ; snd' := true |} = 1.
 Proof. reflexivity. Qed.
 
-Example view_snd : view _snd' {| fst' := 1 ; snd' := true |} = true.
+Example view_snd : Lens.view _snd' {| fst' := 1 ; snd' := true |} = true.
 Proof. reflexivity. Qed.
 
 (* Basic over tests *)
-Example over_fst : over _fst' S {| fst' := 1 ; snd' := true |} = {| fst' := 2 ; snd' := true |}.
+Example over_fst : Lens.over _fst' S {| fst' := 1 ; snd' := true |} = {| fst' := 2 ; snd' := true |}.
 Proof. reflexivity. Qed.
 
-Example over_snd : over _snd' negb {| fst' := 1 ; snd' := true |} = {| fst' := 1 ; snd' := false |}.
+Example over_snd : Lens.over _snd' negb {| fst' := 1 ; snd' := true |} = {| fst' := 1 ; snd' := false |}.
 Proof. reflexivity. Qed.
 
 (* set is over with a constant function *)
-Example set_fst : over _fst' (fun _ => 42) {| fst' := 1 ; snd' := true |} = {| fst' := 42 ; snd' := true |}.
+Example set_fst : Lens.over _fst' (fun _ => 42) {| fst' := 1 ; snd' := true |} = {| fst' := 42 ; snd' := true |}.
 Proof. reflexivity. Qed.
 
 (* view after over gives the result of the function *)
 Example view_over_fst (p : Pair nat bool) (f : nat -> nat) :
-  view _fst' (over _fst' f p) = f (view _fst' p).
+  Lens.view _fst' (Lens.over _fst' f p) = f (Lens.view _fst' p).
 Proof. reflexivity. Qed.
 
 (* over on one field doesn't affect the other *)
 Example over_fst_snd_independent (p : Pair nat bool) (f : nat -> nat) :
-  view _snd' (over _fst' f p) = view _snd' p.
+  Lens.view _snd' (Lens.over _fst' f p) = Lens.view _snd' p.
 Proof. reflexivity. Qed.
 
 Example over_snd_fst_independent (p : Pair nat bool) (f : bool -> bool) :
-  view _fst' (over _snd' f p) = view _fst' p.
+  Lens.view _fst' (Lens.over _snd' f p) = Lens.view _fst' p.
 Proof. reflexivity. Qed.
 
 (* over twice composes *)
 Example over_twice (p : Pair nat bool) (f g : nat -> nat) :
-  over _fst' f (over _fst' g p) = over _fst' (fun x => f (g x)) p.
+  Lens.over _fst' f (Lens.over _fst' g p) = Lens.over _fst' (fun x => f (g x)) p.
 Proof. reflexivity. Qed.
 
 (* lens composition *)
 Record Nested (A : Type) := {
   inner : Pair A bool ;
 }.
-MetaCoq Run (genLensK (MPfile ["test"], "Nested")).
+MetaCoq Run (TC.genLensN "Nested").
 Arguments inner {_}.
 Arguments _inner {_}.
 
 Example view_composed (n : Nested nat) :
-  view (lens_compose _inner _fst') n = view _fst' (view _inner n).
+  Lens.view (Lens.compose _inner _fst') n = Lens.view _fst' (Lens.view _inner n).
 Proof. reflexivity. Qed.

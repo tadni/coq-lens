@@ -26,7 +26,7 @@ Fixpoint countTo (n : nat) : list nat :=
 Definition lensName (ls : String.string) (i : ident) : ident :=
   String.of_string (ls ++ String.to_string i).
 
-MetaCoq Quote Definition cBuild_Lens := Build_Lens.
+MetaCoq Quote Definition cBuild_Polymorphic := Build_Polymorphic.
 
 Local Definition mkLens (At : term) (info : Info) (i : nat)
 : option (ident * term) :=
@@ -36,7 +36,6 @@ Local Definition mkLens (At : term) (info : Info) (i : nat)
     let ps      := info.(params) in
     let fields  := info.(fields) in
     let nfields := List.length fields in
-    (* inductive applied to its params: tApp (tInd ind []) [tRel (np-1); ...; tRel 0] *)
     let param_args := map tRel (rev (countTo np)) in
     let AppliedAt :=
       if Nat.eqb np 0 then At
@@ -47,34 +46,28 @@ Local Definition mkLens (At : term) (info : Info) (i : nat)
     | None => None
     | Some body =>
       let name := body.(proj_name) in
-      (* proj_type is under an extra phantom binder for the inductive itself;
-         subst1 eliminates it to get the type under the param lambdas *)
       let Bt := subst1 (tRel 0) 0 body.(proj_type) in
       let p (x : nat) : projection := mkProjection ind np x in
-      (* inside the over body we are under np + 2 binders (params, f, p);
-         params shift up by 2 relative to under-param context *)
       let param_ctor_args := map (fun k => tRel (k + 2)) (rev (countTo np)) in
       let get_body := tProj (p i) (tRel 0) in
+      (* set: tRel 1 = new value, tRel 0 = record p *)
       let f x :=
-        let this := tProj (p x) (tRel 0) in
         if PeanoNat.Nat.eqb x i
-        then tApp (tRel 1) (this :: nil)
-        else this
+        then tRel 1          (* the new value directly *)
+        else tProj (p x) (tRel 0)
       in
       let update_body :=
         tApp ctor (param_ctor_args ++ map f (countTo nfields))
       in
       let lens_body :=
-        tApp cBuild_Lens (
+        tApp cBuild_Polymorphic (
           AppliedAt :: AppliedAt :: Bt :: Bt ::
           tLambda (mkBindAnn nAnon Relevant) AppliedAt get_body ::
-          tLambda (mkBindAnn nAnon Relevant)
-            (tProd (mkBindAnn nAnon Relevant) Bt (lift 1 0 Bt))
+          (* set: λ (new : Bt) (p : AppliedAt), update_body *)
+          tLambda (mkBindAnn nAnon Relevant) Bt
             (tLambda (mkBindAnn nAnon Relevant) (lift 1 0 AppliedAt) update_body) ::
           nil)
       in
-      (* ind_params is stored innermost-first (B then A for Pair A B),
-         so fold_right produces the correct outermost-first wrapping *)
       let wrapped :=
         fold_right
           (fun decl acc => tLambda decl.(decl_name) decl.(decl_type) acc)
